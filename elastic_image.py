@@ -12,7 +12,6 @@ class elastic_image():
         self.graph = tf.get_default_graph()
         self.set_tension_kernel([[0, .25, 0], [.25, -1, .25], [0, .25, 0]])
 
-
     def get_image(self):
         return self.image
 

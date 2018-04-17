@@ -10,8 +10,9 @@ import time
 from matplotlib.colors import LinearSegmentedColormap
 import matplotlib.cm as cm
 from elastic_image import elastic_image
+import os
 
-def registration_to_multi_color_log(ims,  title = "multi_color_plot"):
+def registration_to_multi_color_log(ims,  title = "multi_color_plot", directory = None):
     ims = np.log(ims + 1) / np.amax(np.log(ims + 1))
 
     colors = cm.rainbow(np.linspace(0, 1, ims.shape[0]))
@@ -33,27 +34,43 @@ def registration_to_multi_color_log(ims,  title = "multi_color_plot"):
                    alpha=1
                    )
 
-    plt.savefig(title+".png")
+    if directory is None:
+        directory = ''
+    else:
+        directory = '{}/'.format(directory)
+
+    plt.savefig(directory + title + '.png')
 
     return
 
-def individual_plots(ims, title= "individual_plots"):
-    fig, ax = plt.subplots(1, ims.shape[0])
+def individual_plots(ims, title= "individual_plots", directory = None):
+    if directory is None:
+        directory = ''
+    else:
+        directory = '{}/'.format(directory)
+
+    # fig, ax = plt.subplots(1, ims.shape[0])
 
     colors = cm.rainbow(np.linspace(0, 1, ims.shape[0]))
 
     for im_num in range(ims.shape[0]):
         colormap = LinearSegmentedColormap.from_list(
             'my_cmap', ['black', colors[im_num]], 256)
-
+        title_im = "{}_{}".format(title, im_num)
         im_to_plot = np.log(ims[im_num] + 1) / (np.amax(np.log(ims[im_num] + 1)))
-        ax[im_num].imshow(im_to_plot,cmap=colormap)
-
-    plt.savefig(title+ '.png')
+        plt.figure()
+        plt.imshow(im_to_plot,cmap=colormap)
+        plt.savefig(directory + title_im + '.png')
+        # ax[im_num].imshow(im_to_plot,cmap=colormap)
 
     return
 
-def registration_compound(ims, title="compounded_plot"):
+def registration_compound(ims, title="compounded_plot", directory = None):
+    if directory is None:
+        directory = ''
+    else:
+        directory = '{}/'.format(directory)
+
     ims = np.log(ims + 1) / (np.amax(np.log(ims + 1)) + .0001)
     im_sum = np.sum(ims,axis = 0)/ims.shape[0]
 
@@ -61,7 +78,7 @@ def registration_compound(ims, title="compounded_plot"):
     plt.imshow(im_sum)
     plt.title("individual_images")
     plt.colorbar()
-    plt.savefig(title + ".png")
+    plt.savefig(directory + title + ".png")
 
     return im_sum
 
@@ -170,132 +187,160 @@ def make_loss_multi_im(images, elastic_alpha = 1):
     return total_loss, elastic_loss_total, alphas, ims_tf
 
 
+def align_images(directory):
 
+    if not os.path.exists(directory):
+        os.makedirs(directory)
 
-data_temp = np.load('heart_rotation.npy').astype(np.float32)
+    
+    data_temp = np.load('noah_wrist_robot.npy').astype(np.float32)
+    
+    print(data_temp.shape)
+    
+    im_0 = data_temp[0,:,:]
 
-print(data_temp.shape)
+    im_1 = data_temp[1,:,:]
 
-im_0 = data_temp[0,:,:]
-im_1 = data_temp[1,:,:]
-im_2 = data_temp[2,:,:]
-im_3 = data_temp[3,:,:]
-im_4 = data_temp[4,:,:]
-im_5 = data_temp[5,:,:]
-im_6 = data_temp[6,:,:]
-im_7 = data_temp[7,:,:]
-im_8 = data_temp[8,:,:]
-
-im_0 = rotate(im_0, -40, reshape = False)
-im_0 = np.clip(im_0,0, a_max= None)
-
-im_1 = rotate(im_1, -30, reshape = False)
-im_1 = np.clip(im_1,0, a_max= None)
-
-im_2 = rotate(im_2, -20, reshape = False)
-im_2 = np.clip(im_2,0, a_max= None)
-
-im_3 = rotate(im_3, -10, reshape = False)
-im_3 = np.clip(im_3,0, a_max= None)
-
-im_4 = rotate(im_4, 0, reshape = False)
-im_4 = np.clip(im_4,0, a_max= None)
-
-im_5 = rotate(im_5, 10, reshape = False)
-im_5 = np.clip(im_5,0, a_max= None)
-
-im_6 = rotate(im_6, 20, reshape = False)
-im_6 = np.clip(im_6,0, a_max= None)
-
-im_7 = rotate(im_7, 30, reshape = False)
-im_7 = np.clip(im_7,0, a_max= None)
-
-im_8 = rotate(im_8, 40, reshape = False)
-im_8 = np.clip(im_8,0, a_max= None)
-
-# [im_4, im_0, im_1, im_2, im_3, im_5, im_6, im_7, im_8]
-
-ims_np = np.stack([im_4, im_2, im_3, im_5, im_6], axis=0)
-
-##load ims
-graph = tf.Graph()
-
-with graph.as_default():
-
-    images = load_n_images(ims_np, total_dim = (700,1000), pad = 0 )
-
-    num_points = [3,4] #minimum 2 in any dimension (defaults to corners)
-    total_points = num_points[0]*num_points[1]
-
-    start_image = images[0].get_image()
-    iter = 1
-
-    for image in images[1:]:
-        image.make_control_points(num_points[0],num_points[1])
-        image.make_initial_guess(start_image)
-        image.make_warp_points_and_matrix()
-
-        image.warp()
-        warp_points = image.get_warp_points()
+    im_2 = data_temp[2,:,:]
+    im_3 = data_temp[3,:,:]
+    im_4 = data_temp[4,:,:]
+    im_5 = data_temp[5,:,:]
+    im_6 = data_temp[6,:,:]
+    im_7 = data_temp[7,:,:]
+    im_8 = data_temp[8,:,:]
 
 
 
-    loss_total, elastic_loss, alphas, ims_tf = make_loss_multi_im(images , 1)
+    im_0 = rotate(im_0, -40, reshape = False)
+    im_0 = np.clip(im_0,0, a_max= None)
+    
+    im_1 = rotate(im_1, -30, reshape = False)
+    im_1 = np.clip(im_1,0, a_max= None)
+    
+    im_2 = rotate(im_2, -20, reshape = False)
+    im_2 = np.clip(im_2,0, a_max= None)
+    
+    im_3 = rotate(im_3, -10, reshape = False)
+    im_3 = np.clip(im_3,0, a_max= None)
+    
+    im_4 = rotate(im_4, 0, reshape = False)
+    im_4 = np.clip(im_4,0, a_max= None)
+    
+    im_5 = rotate(im_5, 10, reshape = False)
+    im_5 = np.clip(im_5,0, a_max= None)
+    
+    im_6 = rotate(im_6, 20, reshape = False)
+    im_6 = np.clip(im_6,0, a_max= None)
+    
+    im_7 = rotate(im_7, 30, reshape = False)
+    im_7 = np.clip(im_7,0, a_max= None)
+    
+    im_8 = rotate(im_8, 40, reshape = False)
+    im_8 = np.clip(im_8,0, a_max= None)
 
-    #optimizer
-    global_step = tf.Variable(0, trainable=False, name='global_step')
-    optimizer = tf.train.AdamOptimizer(learning_rate = 0.5)
-    optimizer = optimizer.minimize(loss_total, global_step=global_step)
+    fig, ax = plt.subplots(1, 2)
 
-    #make summaries
-    for image in images[1:]:
-        image.make_summaries()
-    tf.summary.scalar("loss", loss_total)
-    merged = tf.summary.merge_all()
-    #intitialize
+    ax[0].imshow(im_4)
+    ax[1].imshow(im_7)
 
-    init_op = tf.global_variables_initializer()
-    #
-
-    ##run
-    steps = 50
-    loss_ = []
-
-    time_start = time.time()
-    with tf.Session() as sess:
-
-        sess.run(init_op)
-
-        train_writer = tf.summary.FileWriter('./train', sess.graph)
-
-
-        ims_eval = sess.run(ims_tf)
-        individual_plots(ims_eval[:,:,:,0], title="raw_images")
-        registration_to_multi_color_log(ims_eval[:,:,:,0], title="registration_before_correction")
-
-        for step in range(steps):
-
-            (_, loss_eval, elastic_loss_total_eval) = sess.run([optimizer, loss_total, elastic_loss])
-
-            if step%50 == 0:
-                (summary_eval) = sess.run(merged)
-                train_writer.add_summary(summary_eval, step)
-
-                print("loss at step {} is {}. Elastic {}".format(step, loss_eval, elastic_loss_total_eval))
-                loss_.append(loss_eval)
-
-        (ims_eval, _) = sess.run([ims_tf, loss_total])
-
+    # [im_4, im_0, im_1, im_2, im_3, im_5, im_6, im_7, im_8]
+    
+    ims_np = np.stack([im_4,im_3,im_5, im_6], axis=0)
+    
+    ##load ims
+    graph = tf.Graph()
+    
+    with graph.as_default():
+    
+        images = load_n_images(ims_np, total_dim = (900,1200), pad = 0 )
+    
+        num_points = [3,4] #minimum 2 in any dimension (defaults to corners)
+        total_points = num_points[0]*num_points[1]
+    
+        start_image = images[0].get_image()
+        iter = 1
+    
+        print(start_image.shape)
+    
         for image in images[1:]:
-            image.plot_quiver(sess)
+            image.make_control_points(num_points[0],num_points[1])
+            image.make_initial_guess(start_image/iter)
+            image.make_warp_points_and_matrix()
+            image.warp()
+    
+            start_image = start_image+image.get_warped()
+    
+            with tf.Session() as sess:
+                sess.run(tf.global_variables_initializer())
+                new_image = sess.run(start_image)
+                print(new_image.shape)
+                plt.imsave("{}/register_image_{}.png".format(directory,iter),new_image[0,:,:,0])
+    
+            iter +=1
+    
+            start_image = tf.constant(new_image)    
+    
+        loss_total, elastic_loss, alphas, ims_tf = make_loss_multi_im(images , .7)
+    
+        #optimizer
+        global_step = tf.Variable(0, trainable=False, name='global_step')
+        optimizer = tf.train.AdamOptimizer(learning_rate = 0.7)
+        optimizer = optimizer.minimize(loss_total, global_step=global_step)
+    
+        #make summaries
+        for image in images[1:]:
+            image.make_summaries()
+        tf.summary.scalar("loss", loss_total)
+        merged = tf.summary.merge_all()
+        #intitialize
+    
+        init_op = tf.global_variables_initializer()
+        #
+    
+        ##run
+        steps = 50
+        loss_ = []
+    
+        time_start = time.time()
+        with tf.Session() as sess:
+    
+            sess.run(init_op)
+    
+            train_writer = tf.summary.FileWriter('{}/train'.format(directory), sess.graph)
+    
+            ims_eval = sess.run(ims_tf)
+            individual_plots(ims_eval[:,:,:,0], title="raw_images", directory=directory)
 
-    time_end = time.time()
 
-print("runtime: {}".format(time_end-time_start))
+            registration_to_multi_color_log(ims_eval[:,:,:,0], title="registration_before_correction")
+    
+            for step in range(steps):
+    
+                (_, loss_eval, elastic_loss_total_eval) = sess.run([optimizer, loss_total, elastic_loss])
+    
+                if step%10 == 0:
+                    (summary_eval) = sess.run(merged)
+                    train_writer.add_summary(summary_eval, step)
+    
+                    print("loss at step {} is {}. Elastic {}".format(step, loss_eval, elastic_loss_total_eval))
+                    loss_.append(loss_eval)
+    
+            (ims_eval, _) = sess.run([ims_tf, loss_total])
+    
+            for image in images[1:]:
+                image.plot_quiver(sess)
+    
+        time_end = time.time()
+    
+    print("runtime: {}".format(time_end-time_start))
+    
+    plt.figure()
+    loss_plot = plt.plot(loss_)
+    plt.savefig("loss_plot.png")
+    
+    registration_to_multi_color_log( ims_eval[:,:,:,0] , title = "registration_after_correction", directory = directory)
+    registration_compound(ims_eval[:,:,:,0], directory=directory)
 
-plt.figure()
-loss_plot = plt.plot(loss_)
-plt.savefig("loss_plot.png")
 
-registration_to_multi_color_log( ims_eval[:,:,:,0] , title = "registration_after_correction")
-registration_compound(ims_eval[:,:,:,0])
+if __name__ == "__main__":
+    align_images("run_data_2")
