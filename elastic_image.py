@@ -4,23 +4,38 @@ import matplotlib.pyplot as plt
 
 class elastic_image():
 
-    def __init__(self, image, corners, name = "elastic_image"):
+    '''
+    elastic_image objects parametrizes the small scale elastic shifts for image registration.
+    '''
+
+    def __init__(self, image, extra_pad = 0, name = "elastic_image"):
+
         self.name = name
-        self.image = image
-        self.sz = image.get_shape().as_list()
-        self.corners = corners
+
+        self.image, self.corner_points, self.center_point = self.displace_and_pad(image, extra_pad)
+
+        self.sz = self.image.get_shape().as_list()
+
         self.graph = tf.get_default_graph()
+
         self.set_tension_kernel([[0, .25, 0], [.25, -1, .25], [0, .25, 0]])
 
     def get_image(self):
         return self.image
 
     def get_corners(self):
-        return self.corners
+        return self.corner_points
 
-    def _make_control_points_np(self, corners, num_points_0, num_points_1):
-        x_space = np.linspace(start=corners[0, 0], stop=corners[-1, 0], num=num_points_0, dtype=np.int)
-        y_space = np.linspace(start=corners[0, 1], stop=corners[-1, -1], num=num_points_1, dtype=np.int)
+    def get_center_points(self):
+        '''
+
+        :return: center point for image [x, y]
+        '''
+        return self.center_point
+
+    def _make_control_points_np(self,  num_points_0, num_points_1):
+        x_space = np.linspace(start=self.corner_points[0, 0], stop=self.corner_points[-1, 0], num=num_points_0, dtype=np.int)
+        y_space = np.linspace(start=self.corner_points[0, 1], stop=self.corner_points[-1, -1], num=num_points_1, dtype=np.int)
         x_tile = np.tile(x_space, (num_points_1, 1))
         y_tile = np.tile(y_space, (num_points_0, 1)).T
         source_control_points = np.stack([x_tile, y_tile], axis=0).T.reshape(-1, 2)
@@ -29,18 +44,12 @@ class elastic_image():
     def make_control_points(self, num_0, num_1):
         self.num_0 = num_0
         self.num_1 = num_1
-        self.control_points_np = self._make_control_points_np(self.corners, num_0, num_1)
+        self.control_points_np = self._make_control_points_np(num_0, num_1)
         self.control_points = tf.constant( self.control_points_np ,tf.float32)
         self.total_points = num_0*num_1
 
     def get_control_points(self):
         return self.control_points
-
-    def make_initial_guess(self, base_image):
-        self.initial_guess, self.corr_v = phase_correlate_custom(base_image, self.image)
-        self.initial_guess = tf.expand_dims(self.initial_guess, 0)
-        self.initial_guess = tf.tile( self.initial_guess, [self.total_points, 1])
-        self.initial_guess = tf.cast( self.initial_guess, tf.float32)
 
     def make_warp_points_and_matrix(self, scale=1., initial_offsets = None, trainable = True):
         '''
@@ -51,15 +60,14 @@ class elastic_image():
         :param trainable: set warp_points to be trainable
         :return: none
         '''
+
         if initial_offsets is not None:
-            self.warp_points = tf.Variable(self.initial_guess +
-                                           initial_offsets,
+            self.warp_points = tf.Variable(initial_offsets,
                                            dtype=tf.float32, trainable=trainable, name="warp_points")
             print('manually setting inital_offsets')
         else:
             assert isinstance(scale, (int, float))
-            self.warp_points = tf.Variable(self.initial_guess +
-                                        tf.random_uniform([self.total_points, 2], minval=-1, maxval=1) * scale,
+            self.warp_points = tf.Variable(tf.random_uniform([self.total_points, 2], minval=-1, maxval=1) * scale,
                                         dtype=tf.float32, trainable=trainable, name= "warp_points")
         #
         self.warp_matrix = tf.expand_dims(self.warp_points, 0)
@@ -130,26 +138,73 @@ class elastic_image():
         self.warp_evaluated = sess.run(self.warped)
 
     def evaluate_warp_points(self, sess):
+        self.small_scale_warp = self.warp_points - self.initial_guess
         self.warp_points_eval = sess.run(self.warp_points)
-        
-    
+
+    def displace_and_pad(self, image, extra_pad=0):
+        '''
+
+        :param image: 2D or 4D Tensor
+        :param extra_pad:
+        :return:
+        '''
+
+        sz = image.get_shape().as_list()
+
+        if len(sz) == 2:
+            tf_ = tf.expand_dims(tf.expand_dims(image, 0), 3)
+        else:
+            assert len(sz) == 4
+            tf_ = image
+
+        sz_tf_ = tf_.get_shape().as_list()
+
+        # pads image on all spatial dimensions by  $pad
+        # locates image in location of "new" image corresponding to self.displacement
+        # adds new alpha dimension to channel axis
+
+        alpha_ = tf.pad(tf.Variable(tf.ones_like(tf_), trainable = False),
+                        [[0, 0], [extra_pad, extra_pad],
+                         [extra_pad, extra_pad], [0, 0]], mode='constant')
+
+        tf_ = tf.pad(tf_, [[0, 0], [extra_pad , extra_pad ],
+                           [extra_pad, extra_pad], [0, 0]], mode='constant')
+
+        tf_ = tf.concat([tf_, alpha_], axis=3)
+
+        corner_points = np.array([
+            [extra_pad, extra_pad],
+            [extra_pad + sz_tf_[1], extra_pad],
+            [extra_pad , extra_pad + sz_tf_[2]],
+            [extra_pad + sz_tf_[1], extra_pad + sz_tf_[2]]
+        ])
+
+        #center point used for translations
+        center_point = tf.constant([int(sz_tf_[1]/2) + extra_pad , int(sz_tf_[2]/2) + extra_pad])
+
+        return tf_, corner_points, center_point
 
 
-def phase_correlate_custom(image_1, image_2, window=None):
-    sz = image_1.get_shape().as_list()
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
 
-    # calculate hamming window
-    ham2d = tf.sqrt(tf.einsum('i,j->ij',
-                              tf.contrib.signal.hamming_window(sz[1]),
-                              tf.contrib.signal.hamming_window(sz[2])))
+    data_temp = np.load('heart_rotation.npy').astype(np.float32)
+    im_0 = tf.Variable(data_temp[0, :, :])
+    elastic_test = elastic_image( im_0 , extra_pad = 20)
 
-    corr_v = (tf.ifft2d(tf.fft2d(tf.cast(image_1[0, :, :, 0] * ham2d, tf.complex64)) *
-                        tf.ifft2d(tf.cast(image_2[0, :, :, 0] * ham2d, tf.complex64))))
-    corr_v = tf.real(corr_v)
-    max_index = tf.argmax(tf.reshape(corr_v, [-1]))
-    max_index = tf.unravel_index(max_index, image_2[0, :, :, 0].shape)
+    elastic_test.make_control_points(2,3)
 
-    #convert index shifts from circular to linear
-    max_index = tf.where(tf.cast(max_index[0],tf.float32)>(sz[1]/2), [-1 * sz[1], 0 ] + max_index,  max_index)
-    max_index = tf.where(tf.cast(max_index[1],tf.float32)>(sz[2]/2), [0,  -1 * sz[2]] + max_index,  max_index)
-    return max_index, corr_v
+    cp = elastic_test.get_control_points()
+    im = elastic_test.get_image()
+    center_p = elastic_test.get_center_points()
+
+    with tf.Session() as sess:
+        sess.run(tf.global_variables_initializer())
+        cp_eval, im_eval, center_p_eval = sess.run([cp, im, center_p])
+
+    print(im_eval.shape)
+    print(cp_eval)
+    print(center_p_eval)
+
+    plt.imsave("im", im_eval[0,:,:,1])
+
