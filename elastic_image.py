@@ -121,6 +121,10 @@ class elastic_image():
                     tf.random_uniform([self.num_control_points, 2], minval=-1, maxval=1) * scale,
                     dtype=tf.float32, trainable=trainable, name="elastic_warp_points")
 
+            # Enforce the mean of elastic distortion is 0.
+            # This removes any mean shift which should be absorbed by the translation vector
+            mean_shift = tf.reduce_mean(self.elastic_warp_points, axis=0)
+
             self.elastic_warp_points = tf.expand_dims(self.elastic_warp_points, 0)
 
             # the sparse_warp_matric is the "physical" reshaping of the list of elastic_warp points

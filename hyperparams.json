@@ -1,51 +1,82 @@
 [
-    {
-        "type": "double",
-        "name": "learning_rate",
-        "bounds": {
-            "max": 5,
-            "min": 0.01
-        }
-    },
-    {
-          "type": "double",
-          "name": "beta",
-          "bounds": {
-              "max": 5,
-              "min": 0.01
-          }
-      },
-    {
-        "type": "int",
-        "name": "num_steps",
-        "bounds": {
-            "max": 1000,
-            "min": 5
-        }
-    },
-    {
-        "type": "int",
-        "name": "initial_scale",
-        "bounds": {
-            "max": 100,
-            "min": 1
-        }
-    },
-    {
-        "type": "int",
-        "name": "scale_tuner_alpha",
-        "bounds": {
-            "max": 10,
-            "min": 0.0
-        }
-    },
-    {
-        "type": "double",
-        "name": "coherence_weight",
-        "bounds": {
-            "max": 1.0,
-            "min": 0
-        }
-
+  {
+    "type": "double",
+    "name": "learning_rate",
+    "bounds": {
+      "max": 5,
+      "min": 0.01
     }
+  },
+  {
+    "type": "double",
+    "name": "beta",
+    "bounds": {
+      "max": 1,
+      "min": 0.01
+    }
+  },
+  {
+    "type": "int",
+    "name": "num_steps",
+    "bounds": {
+      "max": 1000,
+      "min": 5
+    }
+  },
+  {
+    "type": "int",
+    "name": "initial_scale",
+    "bounds": {
+      "max": 100,
+      "min": 1
+    }
+  },
+  {
+    "type": "double",
+    "name": "scale_tuner_alpha",
+    "bounds": {
+      "max": 10,
+      "min": 0.0
+    }
+  },
+  {
+    "type": "double",
+    "name": "elastic_weight",
+    "bounds": {
+      "max": 5.0,
+      "min": 0
+    }
+  },
+  {
+    "type": "double",
+    "name": "rotation_coherence_weight",
+    "bounds": {
+      "max": 5.0,
+      "min": 0
+    }
+  },
+  {
+    "type": "double",
+    "name": "translation_coherence_weight",
+    "bounds": {
+      "max": 5.0,
+      "min": 0
+    }
+  },
+  {
+    "type": "double",
+    "name": "turn_on_rotation_frac",
+    "bounds": {
+      "max": 1.0,
+      "min": 0
+    }
+  },
+  {
+    "type": "double",
+    "name": "turn_on_elastic_frac",
+    "bounds": {
+      "max": 1.0,
+      "min": 0
+    }
+  }
 ]

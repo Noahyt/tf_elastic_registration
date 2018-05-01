@@ -160,21 +160,24 @@ class elastic_image_field():
             def tf_diff_axis_0(a):
                 return a[1:] - a[:-1]
 
-            diff = tf_diff_axis_1(translations)
-            mean_diff = tf.reduce_mean(diff)
-
-            diff = tf_diff_axis_1(diff)
+            diff = tf_diff_axis_0(translations)
             diff = tf.reduce_sum(tf.pow(diff, 2), axis =1)
+            mean_diff, variance = tf.nn.moments(diff, axes=[0])
+            
+            coeff_of_variation = tf.sqrt(variance)/mean_diff
+
+            # diff = tf.reduce_sum(translations, axis=0)
+            # diff = tf.reduce_sum(tf.pow(diff,2))
+            # diff = tf.log(diff)
 
             diff_rotation= tf_diff_axis_0(rotations)
+            #tf.reduce_max(tf.abs(diff)) / mean_diff
 
+            self.translation_coherence_loss = coeff_of_variation
+            self.rotation_coherence_loss = tf.reduce_max(diff_rotation)/tf.reduce_mean(diff_rotation)
 
-            self.coherence_loss = tf.reduce_max(tf.abs(diff))/mean_diff # + tf.reduce_max(diff_rotation)/tf.reduce_mean(diff_rotation)
+        return self.translation_coherence_loss, self.rotation_coherence_loss
 
-        return self.coherence_loss
-
-    def get_coherence_loss(self):
-        return self.coherence_loss
 
     ''' functions for visualization '''
 
@@ -192,6 +195,12 @@ class elastic_image_field():
         for image in self.field_ims:
             rotations.append(image.get_rotation_degree())
         return rotations
+
+    def get_elastic_displacements(self):
+        elastic_displacements = []
+        for image in self.field_ims:
+            elastic_displacements.append(image.get_elastic_warp_points())
+        return elastic_displacements
 
     def get_field_ims(self):
         return self.field_ims
