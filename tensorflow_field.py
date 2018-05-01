@@ -94,7 +94,7 @@ def load_n_images(np_image_array):
         images.append(im_)
     return images
 
-def make_loss_multi_im(elastic_image_field, field_ims, elastic_weight = 1, coherence_weight = 1):
+def make_loss_multi_im(elastic_image_field, field_ims, elastic_weight = 1, translation_coherence_weight=1, rotation_coherence_weight = 1):
 
     with tf.variable_scope("loss"):
 
@@ -109,25 +109,29 @@ def make_loss_multi_im(elastic_image_field, field_ims, elastic_weight = 1, coher
 
         elastic_loss_total = tf.reduce_mean(tf.squeeze(tf.stack(elastic_loss)))
 
-        coherence_loss = elastic_image_field.make_coherence_loss()
+        translation_coherence_loss, rotation_coherence_loss = elastic_image_field.make_coherence_loss()
 
         # can be modified to weight control points more
 
-        total_loss = mse_loss +  elastic_loss_total * elastic_weight + coherence_loss * coherence_weight
+        total_loss = mse_loss +  elastic_loss_total * elastic_weight + translation_coherence_loss * translation_coherence_weight + rotation_coherence_loss * rotation_coherence_weight
 
         loss_dict = {
             'mse_loss': mse_loss,
-            'coherence_loss': coherence_loss,
-            'elastic_loss': elastic_loss,
+            'rotation_coherence_loss': rotation_coherence_loss * rotation_coherence_weight,
+            'translation_coherence_loss': translation_coherence_loss * translation_coherence_weight,
+            'elastic_loss': elastic_loss_total * elastic_weight,
             'total_loss': total_loss
         }
 
     return total_loss, loss_dict
 
+def save_params(translations, rotations, elastic, name='saved_params', directory='.'):
+    np.savez("{}/name".format(directory), translations = translations, rotations = rotations, elastic = elastic)
+
 class scale_tuner():
 
     def __init__(self, initial_scale, alpha = 2):
-        self.scale = initial_scale
+        self.running_scale = initial_scale
         self.alpha = alpha
         self.running_loss = np.zeros([1])
         self.max_derivative = 0
@@ -135,7 +139,6 @@ class scale_tuner():
 
     def update_loss(self, loss):
         self.running_loss = np.concatenate((np.array([loss]), self.running_loss), axis=0)
-        print(self.running_loss)
         self.running_loss = self.running_loss[0:2]
         self.step_since_last_change += 1
         if self.step_since_last_change > 1:
@@ -151,16 +154,23 @@ class scale_tuner():
             self.reset_running_loss()
 
     def reduce_scale(self):
-        self.scale = self.scale * 1 / self.alpha
-        print("updating scale.  now {}".format(self.scale))
+        self.running_scale = self.running_scale * 1 / self.alpha
+        if self.running_scale <1:
+            self.running_scale = 1
+        print("updating running_scale.  now {}".format(self.running_scale))
 
     def get_scale(self):
-        return self.scale
+        return self.running_scale
 
     def reset_running_loss(self):
         self.running_loss = np.zeros([3])
         self.step_since_last_change = 0
         self.max_derivative = 0
+
+    def set_scale(self, new_scale):
+        print("manually setting running_scale.  now {}".format(new_scale))
+        self.running_scale = new_scale
+
 
 def align_images(directory, hparams = None, save_figs = False):
 
@@ -174,7 +184,6 @@ def align_images(directory, hparams = None, save_figs = False):
     initial_rotations = initial_guess["rotations"]
     initial_translations = initial_guess["translations"]
 
-
     if data_temp.shape[1] % 2 == 1:
         data_temp = data_temp[:,:-1,:]
     if data_temp.shape[2] % 2 == 1:
@@ -184,15 +193,11 @@ def align_images(directory, hparams = None, save_figs = False):
     initial_rotations = initial_rotations
     initial_translations = initial_translations
 
-    print(ims_np.shape)
-    print(initial_rotations)
-    print(initial_translations.shape)
-
     ##load ims
     graph = tf.Graph()
-    
+
     with graph.as_default():
-    
+
         images = load_n_images(ims_np)
 
         num_points = (3, 4) # minimum 2 in any dimension (defaults to corners)
@@ -218,17 +223,25 @@ def align_images(directory, hparams = None, save_figs = False):
         warped_ims = tf.squeeze(tf.stack(eif.get_warped_ims()))
         field_images = eif.get_field_ims()
 
-        loss_total, loss_dict = make_loss_multi_im(eif, field_images, 0, coherence_weight=hparams.coherence_weight)
+        loss_total, loss_dict = make_loss_multi_im(eif, field_images, elastic_weight=hparams.elastic_weight, translation_coherence_weight=hparams.translation_coherence_weight, rotation_coherence_weight=hparams.rotation_coherence_weight)
 
-        #optimizer
+        # optimizer
         with tf.variable_scope("optimizers"):
             global_step = tf.Variable(0, trainable=False, name='global_step')
-
-            cartesian_optimizer = tf.train.AdamOptimizer(learning_rate = hparams.learning_rate).minimize(loss_total, global_step=global_step, var_list=eif.get_translation_variables()+eif.get_rotation_variables())
-            elastic_optimizer = tf.train.AdamOptimizer(learning_rate= hparams.learning_rate).minimize(loss_total, global_step=global_step, var_list=eif.get_warp_variables())
+            translation_optimizer = tf.train.AdamOptimizer(learning_rate=hparams.learning_rate,
+                                                           beta1=hparams.beta).minimize(loss_total,
+                                                                                        global_step=global_step,
+                                                                                        var_list=eif.get_translation_variables())
+            cartesian_optimizer = tf.train.AdamOptimizer(learning_rate=hparams.learning_rate,
+                                                         beta1=hparams.beta).minimize(loss_total,
+                                                                                      global_step=global_step,
+                                                                                      var_list=eif.get_translation_variables() + eif.get_rotation_variables())
+            elastic_optimizer = tf.train.AdamOptimizer(learning_rate=hparams.learning_rate,
+                                                       beta1=hparams.beta).minimize(loss_total, global_step=global_step,
+                                                                                    var_list=eif.get_warp_variables())
 
         with tf.variable_scope("summary_ops"):
-            #make summaries
+            # make summaries
             # for image in images[1:]:
             #     image.make_summaries()
 
@@ -241,7 +254,7 @@ def align_images(directory, hparams = None, save_figs = False):
         #intitialize
         with tf.variable_scope("init_ops"):
             init_op = tf.global_variables_initializer()
-    
+
         ##run
         steps = hparams.num_steps
         loss_ = []
@@ -249,14 +262,14 @@ def align_images(directory, hparams = None, save_figs = False):
         st = scale_tuner(hparams.initial_scale, alpha = hparams.scale_tuner_alpha)
 
         with tf.Session() as sess:
-    
-            sess.run(init_op)
-    
-            train_writer = tf.summary.FileWriter('{}/train'.format(directory), sess.graph)
 
-            ims_eval = sess.run(warped_ims, feed_dict={scale: [1]})
+            sess.run(init_op)
 
             if save_figs:
+                train_writer = tf.summary.FileWriter('{}/train'.format(directory), sess.graph)
+
+            if save_figs:
+                ims_eval = sess.run(warped_ims, feed_dict={scale: [1]})
                 individual_plots(ims_eval[:,:,:,0], title="raw_images", directory=directory)
                 registration_to_multi_color_log(ims_eval[:,:,:,0], title="registration_before_correction", directory= directory)
                 registration_to_multi_color_log(ims_eval[:, :, :, 1], title="registration_before_correction_outlines",
@@ -265,72 +278,94 @@ def align_images(directory, hparams = None, save_figs = False):
             time_start = time.time()
 
             for step in range(steps):
+                if step < (hparams.turn_on_rotation_frac * steps):
+                    (_, loss_dict_eval) = sess.run([translation_optimizer, loss_dict], feed_dict={scale:[st.get_scale()]})
+                if step >= (hparams.turn_on_rotation_frac * steps) and step < (hparams.turn_on_elastic_frac * steps):
+                    (_, loss_dict_eval) = sess.run([cartesian_optimizer, loss_dict], feed_dict={scale: [st.get_scale()]})
+                if step >= (hparams.turn_on_elastic_frac * steps):
+                    if st.get_scale() is not 1:
+                        st.set_scale(1)
+                    (_, loss_dict_eval) = sess.run([elastic_optimizer, loss_dict], feed_dict={scale: [st.get_scale()]})
 
-
-                if step%100 ==0:
-                    (_, loss_dict_eval) = sess.run([cartesian_optimizer, loss_dict],
-                                                                       options=run_options,
-                                                                       run_metadata=run_metadata,
-                                                                       feed_dict={scale: [st.get_scale()]})
-                    train_writer.add_run_metadata(run_metadata, 'step%d' % step)
-                else:
-                    (_, loss_dict_eval) = sess.run([cartesian_optimizer, loss_dict],
-                                                                       feed_dict={scale:[st.get_scale()]})
-
-    
-                if step%10 == 0:
-                    # scale_val = start_scale_val - max((step - 20) * (start_scale_val - 4) / steps, 0)
+                if step%int(.1 * steps) == 0:
                     st.update_loss(loss_dict_eval['total_loss'])
                     print("loss at step {} is {}".format(step, loss_dict_eval))
+
                     loss_.append(loss_dict_eval['total_loss'])
 
-                    # if step%50 ==0:
-                    #     (summary_eval) = sess.run(merged, feed_dict={scale: [1]})
-                    #     train_writer.add_summary(summary_eval, step)
+                    if loss_dict_eval['total_loss'] is np.nan:
+                        return np.nan, 0
 
             time_end = time.time()
 
-            (ims_eval, _) = sess.run([warped_ims, loss_total], feed_dict={scale:[1]})
+            (final_translations, final_rotations, final_elastic, final_loss) = sess.run(
+                [eif.get_translations(), eif.get_rotations(), eif.get_elastic_displacements(), loss_dict['mse_loss']], feed_dict={scale: [1]})
 
-            (final_translations, final_rotations, final_loss) = sess.run([eif.get_translations(), eif.get_rotations(), loss_dict['total_loss']], feed_dict={scale:[1]})
+            if save_figs:
+                (ims_eval, _) = sess.run([warped_ims, loss_total], feed_dict={scale:[1]})
 
-            # for image in images[1:]:
-            #     image.plot_quiver(sess)3
+                # if step%50 ==0:
+                #     (summary_eval) = sess.run(merged, feed_dict={scale: [1]})
+                #     train_writer.add_summary(summary_eval, step)
+
+                plt.figure()
+                plt.plot(loss_)
+                plt.savefig("{}/loss_plot.png".format(directory))
+
+                plt.figure()
+                plt.plot(final_rotations)
+                plt.savefig("{}/calculated_rotations.png".format(directory))
+
+                plt.figure()
+                plt.plot(*np.squeeze(np.stack(final_translations, axis=0)).T)
+                plt.savefig("{}/calculated_translations.png".format(directory))
+
+                registration_to_multi_color_log(ims_eval[:, :, :, 0], title="registration_after_correction",
+                                                directory=directory)
+                registration_to_multi_color_log(ims_eval[:, :, :, 1], title="registration_after_correction_outlines",
+                                                directory=directory)
+
+                registration_compound(ims_eval[:, :, :, 0], directory=directory)
+
     runtime = time_end - time_start
-    print("runtime: {}".format(runtime))
 
-    if save_figs:
-        plt.figure()
-        plt.plot(loss_)
-        plt.savefig("{}/loss_plot.png".format(directory))
+    save_params(final_translations, final_rotations, final_elastic, directory=directory)
 
-        plt.figure()
-        plt.plot(final_rotations)
-        plt.savefig("{}/calculated_rotations.png".format(directory))
+    accuracy_error = calculate_accuracy(final_rotations, final_translations)
+    return accuracy_error, runtime, final_loss
 
-        plt.figure()
-        plt.plot(*np.squeeze(np.stack(final_translations, axis = 0)).T)
-        plt.savefig("{}/calculated_translations.png".format(directory))
-
-        registration_to_multi_color_log( ims_eval[:,:,:,0] , title = "registration_after_correction", directory = directory)
-        registration_to_multi_color_log( ims_eval[:,:,:,1] , title = "registration_after_correction_outlines", directory = directory)
-
-        registration_compound(ims_eval[:,:,:,0], directory=directory)
-
-    return final_loss
-
-def calculate_accuracy():
+def calculate_accuracy(rotations, translations):
     '''calculates accuracy based on difference between estimated alignment and true alignment'''
 
-    pass
+    def mse(A,B,axis=None):
+        return ((A - B) ** 2).mean(axis=axis)
+
+    best_rotations = np.array([0, 10, 20, 30, 40, 50, 60, 70, 80])
+    best_tranlations = np.array([[-4, 142],
+                            [-4.9386477, 101.484406],
+                            [2.8768265, 62.58752],
+                            [16.885494, 25.06609],
+                            [40.018234, -8.01094],
+                            [67.59624, -38.59236],
+                            [102.826294, -59.601746],
+                            [141.79037, -72.40365],
+                            [181.28175, -83.46341],
+                                 ])
+
+    norm_factor_rotation = mse(best_rotations[1:], best_rotations[:-1])
+    norm_factor_translation = mse(best_tranlations[1:], best_tranlations[:-1])
+
+    rotation_error = mse(rotations, best_rotations)
+    translation_error = mse(translations, best_tranlations)
+
+    return rotation_error/norm_factor_rotation + translation_error/norm_factor_translation
 
 
 if __name__ == "__main__":
+    hpms = collections.namedtuple('hparams',['name', 'num_steps', 'learning_rate', 'beta', 'initial_scale','scale_tuner_alpha', 'elastic_weight', 'translation_coherence_weight', 'rotation_coherence_weight', 'turn_on_rotation_frac', 'turn_on_elastic_frac'])
 
-    hpms = collections.namedtuple('hparams',['name', 'num_steps', 'learning_rate', 'beta', 'initial_scale','scale_tuner_alpha', 'coherence_weight' ])
+    hparams_run = hpms(name='test', num_steps=20, learning_rate=1.1, beta=.84, initial_scale=24, scale_tuner_alpha = 4.96, elastic_weight = 1., translation_coherence_weight=1.61, rotation_coherence_weight=3.21, turn_on_rotation_frac=.619, turn_on_elastic_frac=1)
 
-    hparams_run = hpms(name='test', num_steps = 50, learning_rate=1.1, beta=1, initial_scale=35, scale_tuner_alpha = 1.1, coherence_weight=1)
-
-    final_loss = align_images(hparams_run.name, hparams_run, save_figs=True)
+    final_loss = align_images(directory='output/' + hparams_run.name, hparams= hparams_run, save_figs=True)
 
     print(final_loss)

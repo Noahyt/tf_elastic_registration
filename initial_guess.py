@@ -121,10 +121,11 @@ print(cum_sum_d)
 cum_sum_angle = np.cumsum(rotate_angs)
 cum_sum_angle = np.insert(cum_sum_angle, 0,[0], axis=0)
 
-print(cum_sum_angle)
+
+
 
 # cum_sum_angle = [0,10,20,30,40,50,60,70,80]
 cum_sum_angle = cum_sum_angle #* 2 * np.pi / 360
 print(cum_sum_angle)
 
-np.savez("heart_rotation_ig", rotations = cum_sum_angle, translations = cum_sum_d)
+# np.savez("heart_rotation_ig", rotations = cum_sum_angle, translations = cum_sum_d)
