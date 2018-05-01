@@ -1,19 +1,19 @@
+'''tensorflow_field supervises image registration using an elastic_image_field.'''
 
-# coding: utf-8
-# In[2]:
 
+import collections
 import numpy as np
 import tensorflow as tf
-import matplotlib.pyplot as plt
-from scipy.ndimage.interpolation import rotate
 import time
-from matplotlib.colors import LinearSegmentedColormap
-import matplotlib.cm as cm
 import os
 
-from field_image import field_image
+from matplotlib.colors import LinearSegmentedColormap
+import matplotlib.cm as cm
+import matplotlib.pyplot as plt
+
 from elastic_image_field import elastic_image_field
 from ycmap import get_yilei_color_map
+
 
 def registration_to_multi_color_log(ims,  title = "multi_color_plot", directory = None):
     ims = np.log10(ims * 100 / np.amax(ims) + 1)
@@ -84,189 +84,253 @@ def registration_compound(ims, title="compounded_plot", directory = None):
 
     return im_sum
 
-
-
 ''''''
 
 
-def load_n_images(np_image_array, total_dim=None, pad=0):
+def load_n_images(np_image_array):
     images = []
     for image_iter in range(np_image_array.shape[0]):
         im_ = tf.Variable(np_image_array[image_iter], trainable=False)
-        print(im_)
-        images.append(field_image(im_, extra_pad = 50, name = "image_{}".format(image_iter)))
+        images.append(im_)
     return images
 
-def make_loss_multi_im(elastic_image_field, field_ims, elastic_alpha = 1):
+def make_loss_multi_im(elastic_image_field, field_ims, elastic_weight = 1, coherence_weight = 1):
 
-    mse_loss = elastic_image_field.get_registration_loss()
+    with tf.variable_scope("loss"):
 
-    elastic_loss = []
+        elastic_image_field.make_registration_loss()
+        mse_loss = elastic_image_field.get_registration_loss()
 
-    for image in field_ims[1:]:
-        image.init_warp_loss(.01)
-        elastic_loss.append(image.get_warp_loss())
+        elastic_loss = []
 
-    elastic_loss_total = tf.reduce_mean(tf.squeeze(tf.stack(elastic_loss)))
+        for image in field_ims[1:]:
+            image.init_warp_loss(.01)
+            elastic_loss.append(image.get_warp_loss())
 
-    #can be modified to weight control points more
+        elastic_loss_total = tf.reduce_mean(tf.squeeze(tf.stack(elastic_loss)))
 
-    total_loss = mse_loss +  elastic_loss_total * elastic_alpha
+        coherence_loss = elastic_image_field.make_coherence_loss()
 
-    return total_loss, elastic_loss_total
+        # can be modified to weight control points more
 
+        total_loss = mse_loss +  elastic_loss_total * elastic_weight + coherence_loss * coherence_weight
 
-def align_images(directory):
+        loss_dict = {
+            'mse_loss': mse_loss,
+            'coherence_loss': coherence_loss,
+            'elastic_loss': elastic_loss,
+            'total_loss': total_loss
+        }
+
+    return total_loss, loss_dict
+
+class scale_tuner():
+
+    def __init__(self, initial_scale, alpha = 2):
+        self.scale = initial_scale
+        self.alpha = alpha
+        self.running_loss = np.zeros([1])
+        self.max_derivative = 0
+        self.step_since_last_change = 0
+
+    def update_loss(self, loss):
+        self.running_loss = np.concatenate((np.array([loss]), self.running_loss), axis=0)
+        print(self.running_loss)
+        self.running_loss = self.running_loss[0:2]
+        self.step_since_last_change += 1
+        if self.step_since_last_change > 1:
+            self.calculate_derivatives()
+
+    def calculate_derivatives(self):
+        derivative = self.running_loss[1] - self.running_loss[0]
+        if derivative > self.max_derivative:
+            print("setting new max derivative {}".format(derivative))
+            self.max_derivative = derivative
+        elif derivative < .1 * self.max_derivative:
+            self.reduce_scale()
+            self.reset_running_loss()
+
+    def reduce_scale(self):
+        self.scale = self.scale * 1 / self.alpha
+        print("updating scale.  now {}".format(self.scale))
+
+    def get_scale(self):
+        return self.scale
+
+    def reset_running_loss(self):
+        self.running_loss = np.zeros([3])
+        self.step_since_last_change = 0
+        self.max_derivative = 0
+
+def align_images(directory, hparams = None, save_figs = False):
 
     if not os.path.exists(directory):
         os.makedirs(directory)
 
-    
     data_temp = np.load('heart_rotation.npy').astype(np.float32)
-    
-    print(data_temp.shape)
-    #TODO(ntoyonaga) images dimensions must be even
-    im_0 = data_temp[0,:622,:]
-    im_1 = data_temp[1,:622,:]
-    im_2 = data_temp[2,:622,:]
-    im_3 = data_temp[3,:622,:]
-    im_4 = data_temp[4,:622,:]
-    im_5 = data_temp[5,:622,:]
-    im_6 = data_temp[6,:,:]
-    im_7 = data_temp[7,:,:]
-    im_8 = data_temp[8,:,:]
 
-    # im_0 = rotate(im_0, -40, reshape = False)
-    # im_0 = np.clip(im_0,0, a_max= None)
-    #
-    # im_1 = rotate(im_1, -30, reshape = False)
-    # im_1 = np.clip(im_1,0, a_max= None)
-    #
-    # im_2 = rotate(im_2, -20, reshape = False)
-    # im_2 = np.clip(im_2,0, a_max= None)
-    #
-    # im_3 = rotate(im_3, -10, reshape = False)
-    # im_3 = np.clip(im_3,0, a_max= None)
-    #
-    # im_4 = rotate(im_4, 0, reshape = False)
-    # im_4 = np.clip(im_4,0, a_max= None)
-    #
-    # im_5 = rotate(im_5, 10, reshape = False)
-    # im_5 = np.clip(im_5,0, a_max= None)
-    #
-    # im_6 = rotate(im_6, 20, reshape = False)
-    # im_6 = np.clip(im_6,0, a_max= None)
-    #
-    # im_7 = rotate(im_7, 30, reshape = False)
-    # im_7 = np.clip(im_7,0, a_max= None)
-    #
-    # im_8 = rotate(im_8, 40, reshape = False)
-    # im_8 = np.clip(im_8,0, a_max= None)
+    initial_guess = np.load('heart_rotation_ig.npz')
 
-    # fig, ax = plt.subplots(1, 2)
-    #
-    # ax[0].imshow(im_4)
-    # ax[1].imshow(im_7)
+    initial_rotations = initial_guess["rotations"]
+    initial_translations = initial_guess["translations"]
 
-    # [im_4, im_0, im_1, im_2, im_3, im_5, im_6, im_7, im_8]
-    
-    ims_np = np.stack([im_4,im_3, im_2], axis=0)
 
-    initial_rotations = [0., -.174, -.2]
-    ims_np = np.stack([im_4, im_3, im_2], axis=0)
+    if data_temp.shape[1] % 2 == 1:
+        data_temp = data_temp[:,:-1,:]
+    if data_temp.shape[2] % 2 == 1:
+        data_temp = data_temp[:,:,:-1]
 
-    initial_translation = [
-        [0, 0],
-        [20, 20],
-        [0, 0],
-    ]
-    
+    ims_np = data_temp #data_temp[::4,:,:576]
+    initial_rotations = initial_rotations
+    initial_translations = initial_translations
+
+    print(ims_np.shape)
+    print(initial_rotations)
+    print(initial_translations.shape)
+
     ##load ims
     graph = tf.Graph()
     
     with graph.as_default():
     
-        images = load_n_images(ims_np, total_dim = (900,1200), pad = 0 )
+        images = load_n_images(ims_np)
 
         num_points = (3, 4) # minimum 2 in any dimension (defaults to corners)
 
-        eif = elastic_image_field([800, 1000])
+        eif = elastic_image_field([1000, 1200])
 
-        for iter in range(len(images)):
-            images[iter].make_control_points(*num_points)
-            images[iter].make_warp_points_and_matrix()
-            images[iter].warp()
+        eif.load_image(images[0],
+                       initial_rotation=initial_rotations[0],
+                       initial_translation=initial_translations[0],
+                       control_points=num_points,
+                       use_as_base=True)
 
-            eif.load_image(images[iter], initial_rotation=initial_rotations[iter],
-                           initial_translation=initial_translation[iter])
+
+        for iter, image in enumerate(images[1:]):
+
+            eif.load_image(image,
+                           initial_rotation= initial_rotations[iter+1],
+                           initial_translation = initial_translations[iter+1],
+                           control_points = num_points)
+
+        scale = eif.warp()
 
         warped_ims = tf.squeeze(tf.stack(eif.get_warped_ims()))
         field_images = eif.get_field_ims()
 
-        eif.make_registration_loss()
-
-        loss_total, elastic_loss = make_loss_multi_im(eif, field_images, .7)
+        loss_total, loss_dict = make_loss_multi_im(eif, field_images, 0, coherence_weight=hparams.coherence_weight)
 
         #optimizer
-        global_step = tf.Variable(0, trainable=False, name='global_step')
-        optimizer = tf.train.AdamOptimizer(learning_rate = 0.7)
-        optimizer = optimizer.minimize(loss_total, global_step=global_step)
-    
-        #make summaries
-        for image in images[1:]:
-            image.make_summaries()
-        tf.summary.scalar("loss", loss_total)
-        merged = tf.summary.merge_all()
+        with tf.variable_scope("optimizers"):
+            global_step = tf.Variable(0, trainable=False, name='global_step')
+
+            cartesian_optimizer = tf.train.AdamOptimizer(learning_rate = hparams.learning_rate).minimize(loss_total, global_step=global_step, var_list=eif.get_translation_variables()+eif.get_rotation_variables())
+            elastic_optimizer = tf.train.AdamOptimizer(learning_rate= hparams.learning_rate).minimize(loss_total, global_step=global_step, var_list=eif.get_warp_variables())
+
+        with tf.variable_scope("summary_ops"):
+            #make summaries
+            # for image in images[1:]:
+            #     image.make_summaries()
+
+            run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+            run_metadata = tf.RunMetadata()
+
+            tf.summary.scalar("loss", loss_total)
+            merged = tf.summary.merge_all()
+
         #intitialize
-    
-        init_op = tf.global_variables_initializer()
-        #
+        with tf.variable_scope("init_ops"):
+            init_op = tf.global_variables_initializer()
     
         ##run
-        steps = 50
+        steps = hparams.num_steps
         loss_ = []
-    
-        time_start = time.time()
+
+        st = scale_tuner(hparams.initial_scale, alpha = hparams.scale_tuner_alpha)
+
         with tf.Session() as sess:
     
             sess.run(init_op)
     
             train_writer = tf.summary.FileWriter('{}/train'.format(directory), sess.graph)
-    
-            ims_eval = sess.run(warped_ims)
 
-            individual_plots(ims_eval[:,:,:,0], title="raw_images", directory=directory)
+            ims_eval = sess.run(warped_ims, feed_dict={scale: [1]})
 
-            registration_to_multi_color_log(ims_eval[:,:,:,0], title="registration_before_correction")
-    
+            if save_figs:
+                individual_plots(ims_eval[:,:,:,0], title="raw_images", directory=directory)
+                registration_to_multi_color_log(ims_eval[:,:,:,0], title="registration_before_correction", directory= directory)
+                registration_to_multi_color_log(ims_eval[:, :, :, 1], title="registration_before_correction_outlines",
+                                                directory=directory)
+
+            time_start = time.time()
+
             for step in range(steps):
-    
-                (_, loss_eval, elastic_loss_total_eval) = sess.run([optimizer, loss_total, elastic_loss])
+
+
+                if step%100 ==0:
+                    (_, loss_dict_eval) = sess.run([cartesian_optimizer, loss_dict],
+                                                                       options=run_options,
+                                                                       run_metadata=run_metadata,
+                                                                       feed_dict={scale: [st.get_scale()]})
+                    train_writer.add_run_metadata(run_metadata, 'step%d' % step)
+                else:
+                    (_, loss_dict_eval) = sess.run([cartesian_optimizer, loss_dict],
+                                                                       feed_dict={scale:[st.get_scale()]})
+
     
                 if step%10 == 0:
-                    (summary_eval) = sess.run(merged)
-                    train_writer.add_summary(summary_eval, step)
-    
-                    print("loss at step {} is {}. Elastic {}".format(step, loss_eval, elastic_loss_total_eval))
-                    loss_.append(loss_eval)
-    
-            (ims_eval, _) = sess.run([warped_ims, loss_total])
+                    # scale_val = start_scale_val - max((step - 20) * (start_scale_val - 4) / steps, 0)
+                    st.update_loss(loss_dict_eval['total_loss'])
+                    print("loss at step {} is {}".format(step, loss_dict_eval))
+                    loss_.append(loss_dict_eval['total_loss'])
 
+                    # if step%50 ==0:
+                    #     (summary_eval) = sess.run(merged, feed_dict={scale: [1]})
+                    #     train_writer.add_summary(summary_eval, step)
+
+            time_end = time.time()
+
+            (ims_eval, _) = sess.run([warped_ims, loss_total], feed_dict={scale:[1]})
+
+            (final_translations, final_rotations, final_loss) = sess.run([eif.get_translations(), eif.get_rotations(), loss_dict['total_loss']], feed_dict={scale:[1]})
 
             # for image in images[1:]:
-            #     image.plot_quiver(sess)
-    
-        time_end = time.time()
-    
-    print("runtime: {}".format(time_end-time_start))
-    
-    plt.figure()
-    loss_plot = plt.plot(loss_)
-    plt.savefig("loss_plot.png")
-    
-    registration_to_multi_color_log( ims_eval[:,:,:,0] , title = "registration_after_correction", directory = directory)
-    registration_compound(ims_eval[:,:,:,0], directory=directory)
+            #     image.plot_quiver(sess)3
+    runtime = time_end - time_start
+    print("runtime: {}".format(runtime))
+
+    if save_figs:
+        plt.figure()
+        plt.plot(loss_)
+        plt.savefig("{}/loss_plot.png".format(directory))
+
+        plt.figure()
+        plt.plot(final_rotations)
+        plt.savefig("{}/calculated_rotations.png".format(directory))
+
+        plt.figure()
+        plt.plot(*np.squeeze(np.stack(final_translations, axis = 0)).T)
+        plt.savefig("{}/calculated_translations.png".format(directory))
+
+        registration_to_multi_color_log( ims_eval[:,:,:,0] , title = "registration_after_correction", directory = directory)
+        registration_to_multi_color_log( ims_eval[:,:,:,1] , title = "registration_after_correction_outlines", directory = directory)
+
+        registration_compound(ims_eval[:,:,:,0], directory=directory)
+
+    return final_loss
+
+def calculate_accuracy():
+    '''calculates accuracy based on difference between estimated alignment and true alignment'''
+
+    pass
 
 
 if __name__ == "__main__":
-    align_images("add_rotation_test_1")
+
+    hpms = collections.namedtuple('hparams',['name', 'num_steps', 'learning_rate', 'beta', 'initial_scale','scale_tuner_alpha', 'coherence_weight' ])
+
+    hparams_run = hpms(name='test', num_steps = 50, learning_rate=1.1, beta=1, initial_scale=35, scale_tuner_alpha = 1.1, coherence_weight=1)
+
+    final_loss = align_images(hparams_run.name, hparams_run, save_figs=True)
+
+    print(final_loss)
